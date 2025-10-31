@@ -1,4 +1,4 @@
-> **Imani Beckett**, *"Optimizing Random Forest Hyperparameters: A Theoretical and Empirical Analysis of Variance Scaling,"*  
+>  *"Optimizing Random Forest Hyperparameters: A Theoretical and Empirical Analysis of Variance Scaling,"*  
 > submitted to the **IEEE International Conference on Big Data (IEEE BigData 2025)**.
 
 ---
