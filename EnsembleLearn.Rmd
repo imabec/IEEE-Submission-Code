@@ -1,0 +1,640 @@
+---
+title: "Comparison ensemble methods"
+output: html_document
+date: "2025-01-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+install.packages("randomForest")
+install.packages("caTools") 
+library(randomForest)
+library(caTools)
+library(readr)
+library(ggplot2)
+R33 <- read_csv("~/Downloads/Copy of R33_Comp_FROM_CCA_FOR_IMANI_Cleaned.xlsx - Comp_Active_FROM_CCA.csv")
+cleaned_R33=subset(R33, select = -c(subj_ID,`...2`,`...3`) )
+cleaned_R33=na.omit(cleaned_R33)
+sample <- sample(c(TRUE, FALSE), nrow(cleaned_R33), replace=TRUE, prob=c(0.7,0.3))
+train  <- cleaned_R33[sample, ]
+test   <- cleaned_R33[!sample, ]
+
+```
+```{r}
+colnames(train)=make.names(colnames(train))
+colnames(test)=make.names(colnames(test))
+n_tree=seq(10,500, by=5)
+mtry=seq(3,7,by=1)
+results=data.frame(mtry=numeric(),ntree=numeric(),mse=numeric())
+for(mtry in mtry) {
+  for (ntree in n_tree) {
+    forest=randomForest(formula = WMN_Acc_12 ~ ., data = train, ntree = ntree,mtry=mtry)
+pred= predict(forest, newdata = test) 
+actual=test$WMN_Acc_12
+mse=mean((actual-pred)^2)
+results=rbind(results,data.frame(mtry=mtry,ntree=ntree,mse=mse))
+  }
+}
+
+
+```
+
+```{r}
+colnames(train)=make.names(colnames(train))
+colnames(test)=make.names(colnames(test))
+   forest=randomForest(formula = F3.F4_gamcoh_across ~ ., data = train, ntree = 500,importance=TRUE)
+pred= predict(forest, newdata = test) 
+actual=test$F3.F4_gamcoh_across
+mse_1=mean((actual-pred)^2)
+forestp
+```
+
+```{r }
+model=lm(WMN_Acc_12 ~ .,data = train)
+pedi=predict(model,test)
+mse_lin=mean((actual-pedi)^2)
+```
+
+```{r}
+custom=c("3"="#D52D00","4"="#FF9A56","5"="#F0F0F0","6"="#D362A4","7"="#A30262")
+plot=ggplot(results,aes(x=ntree, y=mse, color=factor(mtry)))+geom_line()+geom_point()+labs(title="MSE vs Number of Trees for Different Mtry Values", x="Number of Trees (ntree)",y="Mean Squared Error (MSE)",color="mtry")+scale_color_manual(values=custom)+theme_minimal()
+ggsave("RandomForests.png",width=8,height=6,dpi=300)
+```
+
+```{r}
+set.seed(123)
+hypertune_forest=function(y,data) {
+  data=na.omit(data)
+
+  data[[y]]=as.factor(data[[y]])
+sample <-sample(c(TRUE, FALSE), nrow(data), replace=TRUE, prob=c(0.7,0.3))
+train  <- droplevels(data[sample, ])
+test   <- droplevels(data[!sample, ])
+colnames(train)=make.names(colnames(train))
+colnames(test)=make.names(colnames(test))
+n_tree=seq(100,600, by=50)
+mtry=seq(3,ncol(data)-1,by=1)
+  conf=list()
+  i=1
+  OOB=list()
+for(mtry in mtry) {
+  for (ntree in n_tree) {
+  forest=randomForest(formula = as.formula(paste(y,"~ .")), data = train, ntree = ntree,mtry=mtry)
+pred=predict(forest,test)
+confus_mt=table(pred,test[[y]])
+key=paste("mtry",mtry,"ntree",ntree,sep="_")
+conf[[key]]=confus_mt
+OOB[[key]] <- 1-forest$err.rate[,1]
+  }
+}
+  compute_accuracy_df <- function(conf_matrix_list) {
+  accuracy_results <- data.frame(mtry = numeric(), ntree = numeric(), Accuracy = numeric())
+ for (key in names(conf_matrix_list)) {
+    conf_matrix <- conf_matrix_list[[key]]  # Extract confusion matrix
+   total <- sum(conf_matrix)  # Total observations
+    correct <- sum(diag(conf_matrix))  # Sum of diagonal (correct predictions)
+   accuracy <- correct / total  # Compute accuracy
+
+    # Extract mtry and ntree values from the key name
+   params <- unlist(strsplit(key, "_"))
+  mtry_value <- as.numeric(params[2])
+  ntree_value <- as.numeric(params[4])
+    # Store results in a data frame
+   accuracy_results <- rbind(accuracy_results, data.frame(mtry = mtry_value, ntree = ntree_value, Accuracy = accuracy))
+  }
+
+  return(accuracy_results)
+  }
+ accuracy_df <- compute_accuracy_df(conf)
+# accuracy_df=rbind( accuracy_df,OOB)
+basecol=c("#D52D00","#FF9A56","#F0F0F0","#D362A4","#A30262")
+grad=colorRampPalette(basecol)(ncol(data)-1)
+ heat=ggplot(accuracy_df,aes(x=ntree, y=Accuracy, color=factor(mtry)))+geom_line()+geom_point()+
+  labs(title = "Accuracy for Different mtry and ntree Values",
+      x = "mtry",
+       y = "Accuracy",
+       color="mtry")+scale_color_manual(values=grad)+theme_minimal()
+anova_model <- aov(Accuracy ~ mtry *ntree, data = accuracy_df)
+quantiles <- c(0.025, 0.5, 0.975)  # 2.5% (Lower), 50% (Median), 97.5% (Upper)
+
+# Use lapply to compute confidence intervals for each model's OOB errors
+oob_ci_results <- lapply(OOB, function(oob_errors) {
+  ci <- lapply(quantiles, function(q) quantile(oob_errors, probs = c(.25,.5,.75))) 
+  setNames(unlist(ci), c("CI_Lower", "Median", "CI_Upper"))
+   
+})
+  return(list(Anova=summary(anova_model),plot=heat,OOB=OOB,OOb_CI=oob_ci_results))
+}
+
+
+
+
+#alzh_for_acc=names(which.max(sapply(hypertune_forest("Group",alzheimer)$OOb_CI,function(ci) ci["Median"])))
+#alz_ran=names(which.min(sapply(hypertune_forest("Group",alzheimer)$OOb_CI,function(ci) ci["CI_Upper"]-ci["CI_Lower"])))
+#alz_OOB=hypertune_forest("Group",alzheimer)$OOB
+#heart_OOB= hypertune_forest("HeartDisease",heart_csv)$OOB
+#breast_OOB=hypertune_forest("diagnosis",Breast_cancer)$OOB
+#diab_OOB=hypertune_forest("target",diabetesData)$OOB
+#dis_OOB=hypertune_forest("Disease",Disease_symptom_and_patient_profile_dataset)$OOB
+#lung_OOB=hypertune_forest("LUNG_CANCER",survey_lung_cancer)$OOB
+#hep_OOB=hypertune_forest("Category",HepatitisCdata_csv)$OOB
+#cir_OOB=hypertune_forest("Stage",cirrhosis)$OOB
+#scl_OOB=hypertune_forest("group",sclerosis)$OOB
+#col_OOB=hypertune_forest("Dukes.Stage",Colorectal_Cancer_Patient_Data)$OOB
+#he_fa_OOB=hypertune_forest("DEATH_EVENT",heart_failure_clinical_records_dataset)$OOB
+#SA_OOB=hypertune_forest("chd",SAHeart)$OOB
+#copd_OOB=hypertune_forest("COPDSEVERITY",dataset_csv)$OOB
+```
+
+```{r}
+width=list()
+width[1]=which.min(sapply(hypertune_forest("Group",alzheimer)$OOb_CI,function(ci) ci["CI_Upper"]-ci["CI_Lower"]))
+width[2]=which.min(sapply( hypertune_forest("HeartDisease",heart_csv)$OOb_CI,function(ci) ci["CI_Upper"]-ci["CI_Lower"]))
+width[3]=which.min(sapply( hypertune_forest("diagnosis",Breast_cancer)$OOb_CI,function(ci) ci["CI_Upper"]-ci["CI_Lower"]))
+width[4]=which.min(sapply( hypertune_forest("target",diabetesData)$OOb_CI,function(ci) ci["CI_Upper"]-ci["CI_Lower"]))
+width[5]=which.min(sapply(hypertune_forest("LUNG_CANCER",survey_lung_cancer)$OOb_CI,function(ci) ci["CI_Upper"]-ci["CI_Lower"]))
+width[6]=which.min(sapply(hypertune_forest("Category",HepatitisCdata_csv)$OOb_CI,function(ci) ci["CI_Upper"]-ci["CI_Lower"]))
+width[7]=which.min(sapply(hypertune_forest("Stage",cirrhosis)$OOb_CI,function(ci) ci["CI_Upper"]-ci["CI_Lower"]))
+width[8]=which.min(sapply(hypertune_forest("group",sclerosis)$OOb_CI,function(ci) ci["CI_Upper"]-ci["CI_Lower"]))
+width[9]=which.min(sapply(hypertune_forest("Dukes.Stage",Colorectal_Cancer_Patient_Data)$OOb_CI,function(ci) ci["CI_Upper"]-ci["CI_Lower"]))
+width[10]=which.min(sapply(hypertune_forest("DEATH_EVENT",heart_failure_clinical_records_dataset)$OOb_CI,function(ci) ci["CI_Upper"]-ci["CI_Lower"]))
+width[11]=which.min(sapply(hypertune_forest("chd",SAHeart)$OOb_CI,function(ci) ci["CI_Upper"]-ci["CI_Lower"]))
+width[12]=which.min(sapply(hypertune_forest("COPDSEVERITY",dataset_csv)$OOb_CI,function(ci) ci["CI_Upper"]-ci["CI_Lower"]))
+
+```
+
+```{r}
+find_op_med=function(list) {
+  med_al=sapply(list,median)
+  names=which.max(med_al)
+al_max=max(med_al)
+return(list(max=al_max,name=names))
+}
+```
+
+```{r}
+CI=function(data) {
+  lower=quantile(data,probs=.025)
+  upper=quantile(data,probs=.975)
+  return(upper-lower)
+}
+which.min(sapply(alz_OOB,CI))
+which.min(sapply(heart_OOB,CI))
+which.min(sapply(breast_OOB,CI))
+which.min(sapply(diab_OOB,CI))
+which.min(sapply(lung_OOB,CI))
+which.min(sapply(hep_OOB,CI))
+which.min(sapply(cir_OOB,CI))
+which.min(sapply(scl_OOB,CI))
+which.min(sapply(col_OOB,CI))
+which.min(sapply(he_fa_OOB,CI))
+which.min(sapply(SA_OOB,CI))
+which.min(sapply(copd_OOB,CI))
+```
+
+```{r}
+forest_optimal=list()
+forest_optimal[1]=find_op_med(alz_OOB)$max
+forest_optimal[2]=find_op_med(heart_OOB)$max
+forest_optimal[3]=find_op_med(breast_OOB)$max
+forest_optimal[4]=find_op_med(diab_OOB)$max
+forest_optimal[5]=find_op_med(lung_OOB)$max
+forest_optimal[6]=find_op_med(hep_OOB)$max
+forest_optimal[7]=find_op_med(cir_OOB)$max
+forest_optimal[8]=find_op_med(scl_OOB)$max
+forest_optimal[9]=find_op_med(col_OOB)$max
+forest_optimal[10]=find_op_med(he_fa_OOB)$max
+forest_optimal[11]=find_op_med(SA_OOB)$max
+forest_optimal[12]=find_op_med(copd_OOB)$max
+```
+
+```{r}
+width=list()
+ci_fun=function(x) {
+  ci=sapply(unlist(x),quantile(probs=c(.025,.975)))
+  width=ci[2]-ci[1]
+  return(width)
+}
+width[1]=ci_fun(alz_OOB)
+width[2]=ci_fun(heart_OOB)
+width[3]=ci_fun(breast_OOB)
+width[4]=ci_fun(diab_OOB)
+width[5]=ci_fun(lung_OOB)
+width[6]=ci_fun(hep_OOB)
+width[7]=ci_fun(cir_OOB)
+width[8]=ci_fun(scl_OOB)
+width[9]=ci_fun(col_OOB)
+width[10]=ci_fun(he_fa_OOB)
+width[11]=ci_fun(SA_OOB)
+width[12]=ci_fun(copd_OOB)
+```
+
+```{r}
+full_reg=function(target,data) {
+  data=na.omit(data)
+  data[[target]]=as.factor(data[[target]])
+
+depen=target
+formula_st=paste(depen,"~.")
+formula=as.formula( formula_st)
+level_target=levels(data[[target]])
+if (length(level_target)>2) {
+  boot_acc=function(data,indices) {
+    sample <-createDataPartition(data[[target]],p=.7,list=FALSE)
+train  <- droplevels(data[sample, ])
+test   <- droplevels(data[-sample, ])
+colnames(train)=make.names(colnames(train))
+colnames(test)=make.names(colnames(test))
+test[[target]]=factor(test[[target]],levels = level_target)
+model=multinom(formula,data = train)
+pred_prob=predict(model,newdata = test,type = "probs")
+class=level_target[max.col(pred_prob,ties.method = "first")]
+class=factor(class,levels=level_target)
+conf_mat=table(predicted=class,actual=test[[target]])
+acc=sum(diag(conf_mat))/sum(conf_mat)
+return(acc)
+}
+boot_res=boot(data=data,statistic = boot_acc,R=1000)
+acc_ci=boot.ci(boot_res,type="perc")
+return(list(conf_lower=acc_ci,res=boot_res))
+}
+else {
+
+    boot_acc=function(data,indices) {
+        data[[target]]=as.numeric(data[[target]]==unique(data[[target]])[1])
+    sample <-createDataPartition(data[[target]],p=.7,list=FALSE)
+train  <- droplevels(data[sample, ])
+test   <- droplevels(data[-sample, ])
+colnames(train)=make.names(colnames(train))
+colnames(test)=make.names(colnames(test))
+model=suppressWarnings(glm(formula,family=binomial,data = train))
+pred_prob=predict(model,newdata = test,type = "response")
+class=ifelse(pred_prob>.5,level_target[2],level_target[1])
+class=factor(class,levels=level_target)
+conf_mat=table(predicted=class,actual=test[[target]])
+acc=sum(diag(conf_mat))/sum(conf_mat)
+return(acc)
+    }
+    boot_res=boot(data=data,statistic = boot_acc,R=1000)
+acc_ci=boot.ci(boot_res,type="perc")
+return(list(conf=acc_ci,res=boot_res))
+}
+}
+reg_acc=list()
+reg_acc[1]=full_reg("Group",alzheimer)$res
+reg_acc[2]=full_reg("HeartDisease",heart_csv)$res
+reg_acc[3]=full_reg("diagnosis",Breast_cancer)$res
+reg_acc[4]=full_reg("target",diabetesData)$res
+reg_acc[5]=full_reg("LUNG_CANCER",survey_lung_cancer)$res
+reg_acc[6]=full_reg("Category",HepatitisCdata_csv)$res
+reg_acc[7]=full_reg("Stage",cirrhosis)$res
+reg_acc[8]=full_reg("group",sclerosis)$res
+reg_acc[9]=full_reg("Dukes.Stage",Colorectal_Cancer_Patient_Data)$res
+reg_acc[10]=full_reg("DEATH_EVENT",heart_failure_clinical_records_dataset)$res
+reg_acc[11]=full_reg("chd",SAHeart)$res
+reg_acc[12]=full_reg("COPDSEVERITY",dataset_csv)$res
+```
+
+```{r}
+#create massive data frame for comparison
+#find optimal values
+
+find_op_med(alz_OOB)$name
+find_op_med(heart_OOB)$name
+find_op_med(breast_OOB)$name
+find_op_med(diab_OOB)$name
+find_op_med(lung_OOB)$name
+find_op_med(hep_OOB)$name
+find_op_med(cir_OOB)$name
+find_op_med(scl_OOB)$name
+find_op_med(col_OOB)$name
+find_op_med(he_fa_OOB)$name
+find_op_med(SA_OOB)$name
+find_op_med(copd_OOB)$name
+
+n_tree_acc=c(600,150,500,200,100,500,350,450,250,300,500,100)
+m_try_acc=c(3,3,4,3,3,4,3,4,4,5,9,10)
+data_size=c(354,918,569,768,309,615,418,273,61,299,462,101)
+var_num=c(10,12,32,9,16,13,19,17,8,13,11,24)
+n_tree_opt=c(600,500,350,600,500,600,450,550,300,550,500,600)
+m_try_opt=c(8,4,20,4,7,12,8,14,4,11,10,11)
+
+```
+
+```{r}
+df=data.frame(data_size,var_num,n_tree_opt,m_try_opt,data_dims_ratio,parameter_ratio)
+n_tree_opt=c(600,500,350,600,500,600,450,550,300,550,500,600)
+m_try_opt=c(8,4,20,4,7,12,8,14,4,11,10,11)
+data_dims_ratio=data_size/var_num
+parameter_ratio=n_tree_opt/m_try_opt
+ggpairs(df)+theme(strip.text = element_text(size=5))
+```
+
+```{r}
+cor_health=cor(ratio,ratio_ci)
+cor_real=cor(df$Ratio,df$optimal)
+md=randomForest(ratio~ratio_ci,data=df2,importance=TRUE)
+```
+
+
+
+```{r}
+conf_in=list()
+a=full_reg("Group",alzheimer)$conf
+b=full_reg("HeartDisease",heart_csv)$conf
+c=full_reg("diagnosis",Breast_cancer)$conf
+d=full_reg("target",diabetesData)$conf
+e=full_reg("LUNG_CANCER",survey_lung_cancer)$conf
+f=full_reg("Category",HepatitisCdata_csv)$conf
+g=full_reg("Stage",cirrhosis)$conf
+h=full_reg("group",sclerosis)$conf
+i=full_reg("Dukes.Stage",Colorectal_Cancer_Patient_Data)$conf
+j=full_reg("DEATH_EVENT",heart_failure_clinical_records_dataset)$conf
+k=full_reg("chd",SAHeart)$conf
+l=full_reg("COPDSEVERITY",dataset_csv)$conf
+conf_in[1]=a$percent[5]-a$percent[4]
+conf_in[2]=b$percent[5]-b$percent[4]
+conf_in[3]=c$percent[5]-c$percent[4]
+conf_in[4]=d$percent[5]-d$percent[4]
+conf_in[5]=e$percent[5]-e$percent[4]
+conf_in[6]=f$percent[5]-f$percent[4]
+conf_in[7]=g$percent[5]-g$percent[4]
+conf_in[8]=h$percent[5]-h$percent[4]
+conf_in[9]=i$percent[5]-i$percent[4]
+conf_in[10]=j$percent[5]-j$percent[4]
+conf_in[11]=k$percent[5]-k$percent[4]
+conf_in[12]=l$percent[5]-l$percent[4]
+```
+
+
+```{r}
+ boot_acc=function(data,indices,ntree,mtry,target) {
+   data=na.omit(data)
+    sample <-createDataPartition(data[[target]],p=.7,list = FALSE)
+train  <- droplevels(data[sample, ])
+test   <- droplevels(data[-sample, ])
+colnames(train)=make.names(colnames(train))
+colnames(test)=make.names(colnames(test))
+
+forest=suppressWarnings(randomForest(formula = as.formula(paste(target,"~ .")), data = train, ntree = ntree,mtry=mtry))
+pred=predict(forest,test)
+confus_mt=table(pred,test[[y]])
+acc=sum(diag(confus_mt))/sum(confus_mt)
+return(acc)
+ }
+run_bootstrap_rf <- function(data, target, ntree_values, mtry_values, R = 1000) {
+  param_grid <- expand.grid(ntree = ntree_values, mtry = mtry_values)  # Create hyperparameter combinations
+  bootstrap_results <- list()
+  
+  set.seed(123)  # For reproducibility
+  
+  for (i in 1:nrow(param_grid)) {
+    ntree_val <- param_grid$ntree[i]
+    mtry_val <- param_grid$mtry[i]
+    
+    print(paste("Bootstrapping ntree =", ntree_val, ", mtry =", mtry_val))
+    
+    # Run Bootstrap
+    boot_res <- boot(data = data, 
+                     statistic = function(data, i) boot_rf_acc(data, i, ntree_val, mtry_val, target), 
+                     R = R)
+    
+    # Compute Confidence Interval
+    ci <- boot.ci(boot_res, type = "perc")
+    
+    # Store Results
+    bootstrap_results[[paste("ntree", ntree_val, "mtry", mtry_val, sep = "_")]] <- list(
+      accuracy = mean(boot_res$t),
+      conf_int = ci$percent[4:5]
+    )
+  }
+  
+  return(bootstrap_results$conf_int)
+}
+
+#boot_res=boot(data=alzheimer, statistic = boot_acc,R=1000)
+#acc_ci=boot.ci(boot_res,type="perc")
+n_tree=seq(10,500, by=5)
+mtry=seq(3,ncol(alzheimer)-1,by=1)
+alzheimer=na.omit(alzheimer)
+bootstrap_results <- run_bootstrap_rf(alzheimer, "Group", ntree, mtry, R = 1000)
+
+
+
+```
+validation
+```{r}
+perm=replicate(1000,cor(sample(ratio),ratio_ci,method="pearson")) #perm tst cross val
+poly1=lm(ratio_ci~poly(ratio,2,raw = TRUE))
+pval=mean(abs(perm)>=abs(cor_health))
+cor.test(ratio_ci,ratio,method="spearman")
+summary(gam(ratio_ci~s(ratio)))
+poly=lm(ratio_ci~poly(ratio,2,raw = TRUE)+data_size)
+gam=gam(ratio_ci~s(ratio))
+AIC(gam,poly,poly1)
+```
+Predictive model
+```{r}
+poly=lm(ratio_ci~poly(ratio,2,raw = TRUE))
+gam=gam(ratio_ci~s(ratio))
+lin=lm(ratio_ci~ratio)
+#forest=randomForest(ratio_ci~ratio)
+base=c("SL.gam","SL.glm")
+set.seed(123)
+stack=SuperLearner(Y=df3$opt,X=X,SL.library = base,method=method.NNloglik)
+Stack_pred=predict(stack,newdata = X)$pred
+Stack_RMSE=sqrt(mean((Stack_pred-df3$opt)^2))
+ poly_pred=predict(poly,newdata = df3)
+poly_RMSE=sqrt(mean((poly_pred-df3$opt)^2))
+gam_pred=predict(gam,newdata = df3)
+gam_RMSE=sqrt(mean((gam_pred-df3$opt)^2))
+```
+
+AIC Table
+
+```{r}
+
+aic_table <- data.frame(
+  Model = c("GAM", "Quadratic", "Quadratic w/row term "),
+  DF=c(3,4,5),
+  AIC = c(AIC(gam), AIC(poly1), AIC(poly))
+)
+ gt(aic_table) %>%
+    tab_header(
+        title = "AIC Table",
+    )
+```
+
+Figures
+```{r}
+summary(lm(ratio_ci~poly(ratio,2,raw = TRUE))) #quadratic reg with optimal value
+summary(lm(ratio_ci~ratio))#linear reg with optimal value
+summary(lm(ratio_ci~poly(ratio,2,raw = TRUE)+data_size)) 
+ cor(ratio_var,ratio_ci)
+ cor(var_num,m_try_ci)
+ cor(var_num,ratio_ci)
+ cor(data_size,ratio_ci)
+ #cor(ratio,ratio_ci)
+ reg=predict(lm(ratio_ci~ratio))
+ quad=predict(lm(ratio_ci~poly(ratio,2,raw = TRUE)))
+ quad1=predict(lm(ratio_ci~poly(ratio,2,raw = TRUE)+data_size))
+ reg1=predict(lm(ratio_ci~ratio+data_size))
+ggplot(data,aes(x=ratio,y=ratio_ci))+geom_point(size=3,shape=21,stroke=1.5)+geom_line(aes(y=reg),color="yellow",linewidth=1.5)+geom_line(aes(y=quad),color="purple",linewidth=1.5)+geom_line(aes(y=quad1),color="white",linewidth=1.5)+geom_line(aes(y=reg1),color="black",linewidth=1.5)+scale_color_manual(name="Models",values = c("Linear Regression"="yellow", "Quadratic Regression"="purple","Multivariate Qudratic Regression"="white","Multivariate Linear Regression"="black"))+theme_minimal()
+```
+
+```{r}
+poly=lm(ratio_ci~poly(ratio,2,raw = TRUE)+data_size)
+ plot1=ggplot(data,aes(x=ratio,y=ratio_ci))+geom_point(size=3,color="black",fill="white",shape=21,stroke=1.5)+geom_line(aes(y=reg),color="hotpink",linewidth=1)+geom_line(aes(y=quad),color="orange",linewidth=1)
+```
+
+
+
+Regression Figures
+```{r}
+model1=summary(lm(ratio_ci~ratio))
+quad_summary=summary(lm(ratio_ci~poly(ratio,2,raw = TRUE)))
+lin_table <- data.frame(
+  Term = rownames(coef(model1)),
+  Estimate = round(coef(model1)[, "Estimate"], 3),
+  Std_Error = round(coef(model1)[, "Std. Error"], 3),
+  t_value = round(coef(model1)[, "t value"], 3),
+  p_value = round(coef(model1)[, "Pr(>|t|)"], 4)
+)
+r2_row <- data.frame(Term = "R-squared", Estimate = round(model1$r.squared, 3),
+                     Std_Error = NA, t_value = NA, p_value = NA)
+
+adj_r2_row <- data.frame(Term = "Adjusted R-squared", Estimate = round(model1$adj.r.squared, 3),
+                         Std_Error = NA, t_value = NA, p_value = NA)
+lin_table <- rbind(lin_table, r2_row, adj_r2_row)
+gt(lin_table) %>%
+  tab_header(
+    title = "Linear Regression Table",
+  )
+
+# Create regression results table
+quad_table <- data.frame(
+  Term = rownames(coef(quad_summary)),
+  Estimate = round(coef(quad_summary)[, "Estimate"], 3),
+  Std_Error = round(coef(quad_summary)[, "Std. Error"], 3),
+  t_value = round(coef(quad_summary)[, "t value"], 3),
+  p_value = round(coef(quad_summary)[, "Pr(>|t|)"], 4)
+)
+
+# Add R² and Adjusted R² as separate rows
+r2_row <- data.frame(Term = "R-squared", Estimate = round(quad_summary$r.squared, 3),
+                     Std_Error = NA, t_value = NA, p_value = NA)
+
+adj_r2_row <- data.frame(Term = "Adjusted R-squared", Estimate = round(quad_summary$adj.r.squared, 3),
+                         Std_Error = NA, t_value = NA, p_value = NA)
+
+# Combine rows
+quad_table <- rbind(quad_table, r2_row, adj_r2_row)
+
+gt(quad_table) %>%
+  tab_header(
+    title = "Quadratic Regression Table",
+  )
+```
+
+```{r}
+mod=gam(ratio_ci~s(ratio))
+gam_sum=summary(mod)
+parametric_table <- as.data.frame(gam_sum$parametric.anova)
+parametric_table$Term <- rownames(parametric_table)
+
+# Smooth terms table
+#smooth_table <- as.data.frame(gam_sum$smooth)
+#smooth_table$Term <- rownames(smooth_table)
+#colnames(smooth_table) <- c("edf", "Ref.df", "F", "p_value", "Term")
+#smooth_table <- smooth_table[, c("Term", "edf","Ref.df", "F", "p_value")]
+smooth_df <- as.data.frame(gam_sum$anova)
+smooth_df$Term <- rownames(smooth_df)
+
+# Clean column names
+#colnames(smooth_df) <- c("edf", "Ref.df", "F_stat", "p_value", "Term")
+
+# Add empty columns for alignment
+smooth_df$Estimate <- NA
+smooth_df$Std_Error <- NA
+smooth_df$t_value <- NA
+smooth_df$Type <- "Smooth"
+
+# Reorder
+#smooth_df <- smooth_df[, c("Type", "Term", "Estimate", "Std_Error", "t_value", "edf", "F_stat", "p_value")]
+gam_table <- rbind(parametric_table, smooth_df)
+gt(parametric_table) %>%
+  tab_header(
+    title = "GAM Parametric Table",
+  )
+```
+
+```{r}
+quad1_summary=summary(lm(ratio_ci~poly(ratio,2,raw = TRUE)+data_size)) 
+quad_table_add <- data.frame(
+  Term = rownames(coef(quad1_summary)),
+  Estimate = round(coef(quad1_summary)[, "Estimate"], 3),
+  Std_Error = round(coef(quad1_summary)[, "Std. Error"], 3),
+  t_value = round(coef(quad1_summary)[, "t value"], 3),
+  p_value = round(coef(quad1_summary)[, "Pr(>|t|)"], 4)
+)
+r2_row <- data.frame(Term = "R-squared", Estimate = round(quad1_summary$r.squared, 3),
+                     Std_Error = NA, t_value = NA, p_value = NA)
+
+adj_r2_row <- data.frame(Term = "Adjusted R-squared", Estimate = round(quad1_summary$adj.r.squared, 3),
+                         Std_Error = NA, t_value = NA, p_value = NA)
+
+quad_table_add <- rbind(quad_table_add, r2_row, adj_r2_row)
+```
+
+```{r}
+model1=summary(lm(ratio_ci~ratio+data_size))
+lin_table <- data.frame(
+  Term = rownames(coef(model1)),
+  Estimate = round(coef(model1)[, "Estimate"], 3),
+  Std_Error = round(coef(model1)[, "Std. Error"], 3),
+  t_value = round(coef(model1)[, "t value"], 3),
+  p_value = round(coef(model1)[, "Pr(>|t|)"], 4)
+)
+r2_row <- data.frame(Term = "R-squared", Estimate = round(model1$r.squared, 3),
+                     Std_Error = NA, t_value = NA, p_value = NA)
+
+adj_r2_row <- data.frame(Term = "Adjusted R-squared", Estimate = round(model1$adj.r.squared, 3),
+                         Std_Error = NA, t_value = NA, p_value = NA)
+lin_table <- rbind(lin_table, r2_row, adj_r2_row)
+gt(lin_table) %>%
+  tab_header(
+    title = "Multivariate Linear Regression Table",
+  )
+```
+
+```{r}
+
+plot=ggplot(data, aes(x = ratio, y = ratio_ci)) +
+  geom_point(size = 3, shape = 21, stroke = 1.5) +
+
+  # Combine all models into one color-aesthetic mapping for proper legend
+  geom_line(aes(y = reg, color = "Linear"), linewidth = 1.5) +
+  geom_line(aes(y = quad, color = "Quadratic"), linewidth = 1.5) +
+  geom_line(aes(y = quad1, color = "Multivariate Quadratic"), linewidth = 1.5) +
+  geom_line(aes(y = reg1, color = "Multivariate Linear"), linewidth = 1.5) +
+
+  # Manual color and legend title
+  scale_color_manual(
+    name = "Model",
+    values = c(
+      "Linear" = "yellow",
+      "Quadratic" = "purple",
+      "Multivariate Quadratic" = "white",
+      "Multivariate Linear" = "black"
+    )
+  ) 
+```
