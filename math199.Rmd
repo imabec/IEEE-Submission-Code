@@ -1,0 +1,343 @@
+---
+title: "test"
+output: pdf_document
+date: "2025-02-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+generate_random_dataset <- function(n_samples, n_features) {
+  dataset <- twoClassSim(n=n_samples,intercept=0,linearVars = n_features,noiseVars = 0,corrValue = 0)
+  #colnames(dataset) <- paste0("Feature", 1:n_features)
+  dataset$Class <- as.factor(dataset$Class)
+  return(dataset)
+}
+datasets <- list()
+for (i in 1:10) {
+  n_rows <- sample(100:900, 1)  # Randomly choose rows between 100 and 900
+  n_cols <- sample(5:15, 1)  # Randomly choose columns between 5 and 15
+  dataset_name <- paste0("Dataset_", i, "_", n_rows, "rows_", n_cols, "cols")
+  datasets[[dataset_name]] <- generate_random_dataset(n_rows, n_cols)
+}
+```
+
+
+```{r cars}
+set.seed(123)
+
+generate_and_test=function(data,y){
+  data=na.omit(data)
+  data[[y]]=as.factor(data[[y]])
+sample <-sample(c(TRUE, FALSE), nrow(data), replace=TRUE, prob=c(0.7,0.3))
+train  <- droplevels(data[sample, ])
+test   <- droplevels(data[!sample, ])
+colnames(train)=make.names(colnames(train))
+colnames(test)=make.names(colnames(test))
+n_tree=seq(100,600, by=50)
+mtry=seq(3,ncol(data)-1,by=1)
+  conf=list()
+  i=1
+  OOB=list()
+for(mtry in mtry) {
+  for (ntree in n_tree) {
+  forest=randomForest(formula = as.formula(paste(y,"~ .")), data = train, ntree = ntree,mtry=mtry)
+pred=predict(forest,test)
+confus_mt=table(pred,test[[y]])
+key=paste("mtry",mtry,"ntree",ntree,sep="_")
+conf[[key]]=confus_mt
+OOB[[key]] <- 1-forest$err.rate[,1]
+  }
+}
+  
+ return(OOB)
+}
+
+```
+
+```{r}
+set.seed(123)
+generate_random_dataset <- function(n_samples, n_features) {
+  dataset <- twoClassSim(n=n_samples,intercept=0,linearVars = n_features,noiseVars = 0,corrValue = 0) 
+  #colnames(dataset) <- paste0("Feature", 1:n_features)
+  dataset$Class <- as.factor(dataset$Class)
+  return(dataset)
+}
+datasets <- list()
+for (i in 1:100) {
+  n_rows <- sample(100:900, 1)  # Randomly choose rows between 100 and 900
+  n_cols <- sample(5:15, 1)  # Randomly choose columns between 5 and 15
+  dataset_name <- paste0("Dataset_", i, "_", n_rows, "rows_", n_cols, "cols")
+  datasets[[dataset_name]] <- generate_random_dataset(n_rows, n_cols)
+}
+Results=list()
+for (name in names(datasets)) {
+  Results[[name]]=generate_and_test(datasets[[name]],"Class")
+}
+
+Result=list()
+for (i in 1:99) {
+  name=names(Results)[i]
+  Result[[name]]=which.min(sapply(Results[[i]],CI))
+  
+}
+
+df=data.frame(Rows=integer(),Cols=integer(),Mtry=integer(),Ntree=integer(),stringsAsFactors = FALSE)
+for (name in names(Result)) {
+  rows=as.integer(str_extract(name,"[0-9]+(?=rows)"))
+  cols=as.integer(str_extract(name,"[0-9]+(?=cols)"))
+  key=names(Result[[name]])[1]
+  mtry=as.integer(str_extract(key,"(?<=mtry_)[0-9]+"))
+  ntree=as.integer(str_extract(key,"(?<=ntree_)[0-9]+"))
+  df=rbind(df,data.frame(Rows=rows,Cols=cols,Mtry=mtry,Ntree=ntree))
+}
+```
+
+```{r}
+df$Ratio_par=df$Ntree/df$Mtry
+df$Ratio_dim=df$Rows/df$Cols
+model_lin_multi_s=summary(lm(df$Ratio_par~df$Ratio_dim+df$Rows))
+multi_lin_table_synth <- data.frame(
+  Term = rownames(coef(model_lin_multi_s)),
+  Estimate = round(coef(model_lin_multi_s)[, "Estimate"], 3),
+  Std_Error = round(coef(model_lin_multi_s)[, "Std. Error"], 3),
+  t_value = round(coef(model_lin_multi_s)[, "t value"], 3),
+  p_value = round(coef(model_lin_multi_s)[, "Pr(>|t|)"], 4)
+)
+r2_row <- data.frame(Term = "R-squared", Estimate = round(model_lin_multi_s$r.squared, 3),
+                     Std_Error = NA, t_value = NA, p_value = NA)
+
+adj_r2_row <- data.frame(Term = "Adjusted R-squared", Estimate = round(model_lin_multi_s$adj.r.squared, 3),
+                         Std_Error = NA, t_value = NA, p_value = NA)
+multi_lin_table_synth <- rbind(multi_lin_table_synth , r2_row, adj_r2_row)
+gt(multi_lin_table_synth) %>%
+  tab_header(
+    title = "Multivariate Linear Regression Table",
+  )
+
+
+
+```
+
+```{r}
+model_quad_multi_s=summary(lm(df$Ratio_par~poly(df$Ratio_dim,2,raw=TRUE)))
+quad_table_synth <- data.frame(
+  Term = rownames(coef(model_quad_multi_s)),
+  Estimate = round(coef(model_quad_multi_s)[, "Estimate"], 3),
+  Std_Error = round(coef(model_quad_multi_s)[, "Std. Error"], 3),
+  t_value = round(coef(model_quad_multi_s)[, "t value"], 3),
+  p_value = round(coef(model_quad_multi_s)[, "Pr(>|t|)"], 4)
+)
+r2_row <- data.frame(Term = "R-squared", Estimate = round(model_quad_multi_s$r.squared, 3),
+                     Std_Error = NA, t_value = NA, p_value = NA)
+
+adj_r2_row <- data.frame(Term = "Adjusted R-squared", Estimate = round(model_quad_multi_s$adj.r.squared, 3),
+                         Std_Error = NA, t_value = NA, p_value = NA)
+quad_table_synth <- rbind(quad_table_synth, r2_row, adj_r2_row)
+gt(quad_table_synth) %>%
+  tab_header(
+    title = "Qudratic Regression Table",
+  )
+
+
+
+```
+
+```{r}
+model_quad_multi_s=summary(lm(df$Ratio_par~poly(df$Ratio_dim,2,raw=TRUE)+df$Rows))
+quad_table_synth <- data.frame(
+  Term = rownames(coef(model_quad_multi_s)),
+  Estimate = round(coef(model_quad_multi_s)[, "Estimate"], 3),
+  Std_Error = round(coef(model_quad_multi_s)[, "Std. Error"], 3),
+  t_value = round(coef(model_quad_multi_s)[, "t value"], 3),
+  p_value = round(coef(model_quad_multi_s)[, "Pr(>|t|)"], 4)
+)
+r2_row <- data.frame(Term = "R-squared", Estimate = round(model_quad_multi_s$r.squared, 3),
+                     Std_Error = NA, t_value = NA, p_value = NA)
+
+adj_r2_row <- data.frame(Term = "Adjusted R-squared", Estimate = round(model_quad_multi_s$adj.r.squared, 3),
+                         Std_Error = NA, t_value = NA, p_value = NA)
+quad_table_synth <- rbind(quad_table_synth, r2_row, adj_r2_row)
+gt(quad_table_synth) %>%
+  tab_header(
+    title = "Multivariate Qudratic Regression Table",
+  )
+
+
+```
+
+
+
+
+```{r}
+return_list=list()
+for (name in names(datasets)) {
+  Test[[name]]=generate_and_test(datasets[[name]],"Target")
+  test=which.min(lapply(return_list,CI))
+  return_list[[name]]
+}
+Test=lapply(datasets,function(dataset) generate_and_test(dataset,"Target"))
+test=which.min(lapply(return_list,CI))
+```
+
+```{r}
+mod=kmeans(df1,centers=2)
+df1$cluster=as.factor(mod$cluster)
+ggplot(df1,aes(x=cols,y=mtry,color=cluster))+geom_point(size=3)
+
+```
+
+
+
+
+
+```{r}
+df$Ratio=df$Rows/df$Cols
+df$Ratio_CI=df$Ntree/df$Mtry
+summary(lm(Ratio_CI~Ratio,data=df))
+ summary(lm(Ratio_CI~poly(Ratio,2,raw = TRUE)+Rows,data=df))
+```
+Figures
+```{r}
+library(gt)
+library(webshot)
+df_info=data.frame(
+  Names=c("alzheimer","heart_csv","Breast_cancer","diabetesData","survey_lung_cancer","HepatitisCdata_csv","cirrhosis","sclerosis","Colorectal_Cancer_Patient_Data","heart_failure_clinical_records_dataset","SAHeart","dataset_csv"),
+  Rows=c(nrow(alzheimer),nrow(heart_csv),nrow(Breast_cancer),nrow(diabetesData),nrow(survey_lung_cancer),nrow(HepatitisCdata_csv),nrow(cirrhosis),nrow(sclerosis),nrow(Colorectal_Cancer_Patient_Data),nrow(heart_failure_clinical_records_dataset),nrow(SAHeart),nrow(dataset_csv)),
+  Columns=c(ncol(alzheimer),ncol(heart_csv),ncol(Breast_cancer),ncol(diabetesData),ncol(survey_lung_cancer),ncol(HepatitisCdata_csv),ncol(cirrhosis),ncol(sclerosis),ncol(Colorectal_Cancer_Patient_Data),ncol(heart_failure_clinical_records_dataset),ncol(SAHeart),ncol(dataset_csv))
+)
+gt(df_info) %>%
+  tab_header(
+    title = "Dataset Dimensions",
+  )
+
+df_CI=data.frame(Names=c("alzheimer","heart_csv","Breast_cancer","diabetesData","survey_lung_cancer","HepatitisCdata_csv","cirrhosis","sclerosis","Colorectal_Cancer_Patient_Data","heart_failure_clinical_records_dataset","SAHeart","dataset_csv"), CI_Width=unlist(width),Optimal_Ntree=c(600,500,350,600,500,600,450,550,300,550,500,600),
+Optimal_Mtry=c(8,4,20,4,7,12,8,14,4,11,10,11),Optimal_Parameter_Ratio=c(600,500,350,600,500,600,450,550,300,550,500,600)/c(8,4,20,4,7,12,8,14,4,11,10,11))
+gt(df_CI) %>%
+  tab_header(
+    title = "Confidence Interval Width & Parameters",
+  )
+gtsave(table, "table.png")
+```
+CCA Figures
+```{r}
+X= as.matrix(df[, c("data_size", "var_num", "data_dims_ratio")])
+Y=as.matrix(df[, c("n_tree_opt", "m_try_opt", "parameter_ratio")])
+c=cancor(X,Y)
+corr=c$cor
+df_scree <- data.frame(
+  Canonical_Dimension = seq_along(corr), 
+  Correlation = corr
+)
+ggplot(df_scree, aes(x = Canonical_Dimension, y = Correlation)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_text(aes(label = round(Correlation, 2)), vjust = -0.5) +
+  labs(
+    title = "Scree Plot of Canonical Correlations",
+    x = "Canonical Dimension",
+    y = "Canonical Correlation"
+  ) +
+  theme_minimal()
+```
+```{r}
+U1 <- X %*% c$xcoef[, 1]
+V1 <- Y %*% c$ycoef[, 1]
+df_canonical <- data.frame(U1 = U1, V1 = V1)
+
+ggplot(df_canonical, aes(x = U1, y = V1)) +
+  geom_point(alpha = 1, color = "firebrick") +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  labs(
+    title = "Canonical Variables Plot (U1 vs V1)",
+    x = "Canonical Variable 1 (U1 - X)",
+    y = "Canonical Variable 1 (V1 - Y)"
+  ) +
+  theme_minimal()
+
+```
+```{r}
+U <- X %*% c$xcoef
+V <- Y %*% c$ycoef
+
+# Variance in X and Y explained by their canonical variates
+var_X_in_U <- apply(cor(U, X)^2, 2, mean)
+var_Y_in_V <- apply(cor(V, Y)^2, 2, mean)
+
+# Redundancy: variance in Y explained by U (X-side variate)
+redundancy_Y_from_X <- var_Y_in_V * c$cor^2
+
+# Assemble the table
+cca_table <- data.frame(
+  Variables=c("data_size","var_num","data_dims_ratio "),
+  Dimension = paste0("Dim ", seq_along(c$cor)),
+  Canonical_Correlation = round(c$cor, 3),
+  Squared_Correlation = round(c$cor^2, 3),
+  Var_X_Explained = round(var_X_in_U, 3),
+  Var_Y_Explained = round(var_Y_in_V, 3),
+  Redundancy_Y_from_X = round(redundancy_Y_from_X, 3)
+)
+cca_table
+gt(cca_table) %>%
+  tab_header(
+    title = "Canonical Summary Table",
+  )
+```
+
+
+```{r}
+dataset_names=names(datasets)
+parsed_table <- tibble(dataset_name = dataset_names) %>%
+  mutate(
+    name = str_extract(dataset_names, "Dataset_\\d+"),
+    rows = as.integer(str_extract(dataset_names, "\\d+(?=rows)")),
+    cols = as.integer(str_extract(dataset_names, "\\d+(?=colsr)"))
+  ) %>%
+  select(name, rows, cols)
+
+```
+
+
+
+
+```{r }
+vec=list(alz_OOB,heart_OOB,breast_OOB,diab_OOB,lung_OOB,hep_OOB,cir_OOB,scl_OOB,col_OOB,he_fa_OOB,SA_OOB,copd_OOB)
+t=list()
+v=1
+for (i in vec) {
+df=as.data.frame(as.table(sapply(i,CI)))
+x=t.test(df$Freq)
+t[[v]]=x$p.value
+v=v+1
+}
+Names=c("alzheimer","heart_csv","Breast_cancer","diabetesData","survey_lung_cancer","HepatitisCdata_csv","cirrhosis","sclerosis","Colorectal_Cancer_Patient_Data","heart_failure_clinical_records_dataset","SAHeart","dataset_csv")
+t_test=data.frame(Names=Names,Pvalues=unlist(t),row.names = NULL)
+gt(t_test) %>%
+  tab_header(
+    title = "T-Test P values for Different Parameters",
+  )
+```
+
+```{r}
+dataset_names=names(datasets)
+parsed_table <- tibble(dataset_name = dataset_names) %>%
+  mutate(
+    name = str_extract(dataset_name, "Dataset_\\d+"),
+    rows = as.integer(str_extract(dataset_name, "\\d+(?=rows)")),
+    cols = as.integer(str_extract(dataset_name, "\\d+(?=cols)"))
+  )
+parsed_table <-  parsed_table %>%
+  dplyr::select(name, rows, cols)
+gt(parsed_table) %>%
+    tab_header(
+         title = "Synthetic Datasets Parameters",
+   )
+```
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
